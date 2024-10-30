@@ -19,8 +19,8 @@ const ConsultantCapacityDashboard = () => {
   const [consultantData, setConsultantData] = useState([]);
   const [filteredData, setFilteredData] = useState([]);
   const [expandedConsultant, setExpandedConsultant] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [isLoading, setIsLoading] = useState(false); // Now used in the component
+  const [error, setError] = useState(null); // Now used in the component
 
   // Filter states
   const [filters, setFilters] = useState({
@@ -131,6 +131,7 @@ const ConsultantCapacityDashboard = () => {
       }));
     } catch (err) {
       setError('Error processing data: ' + err.message);
+      setIsLoading(false);
     }
   };
 
@@ -153,6 +154,8 @@ const ConsultantCapacityDashboard = () => {
           setIsLoading(false);
         }
       });
+    } else {
+      setIsLoading(false);
     }
   };
 
@@ -379,9 +382,23 @@ const ConsultantCapacityDashboard = () => {
         </div>
       </div>
 
+      {/* Display error if any */}
+      {error && (
+        <div className="mb-4 p-4 bg-red-100 text-red-700 rounded">
+          {error}
+        </div>
+      )}
+
+      {/* Display loading indicator */}
+      {isLoading && (
+        <div className="mb-4 p-4 bg-blue-100 text-blue-700 rounded">
+          Loading data, please wait...
+        </div>
+      )}
+
       {consultantData.length > 0 && (
         <div className="space-y-6">
-          {consultantData.map((consultant) => (
+          {filteredData.map((consultant) => (
             <div key={consultant.name} className="bg-white rounded-lg shadow">
               <button
                 onClick={() => toggleConsultant(consultant.name)}
