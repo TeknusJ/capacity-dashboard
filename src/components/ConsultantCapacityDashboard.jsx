@@ -10,7 +10,7 @@ const ROLE_WEIGHTS = {
   'Lead': 1,
   'Co-Lead': 0.7,
   'Strategic Advisor': 0.3,
-  'Supporting': 0.2
+  'Supporting': 0.5
 };
 
 const MAX_RECOMMENDED_LOAD = 8;
