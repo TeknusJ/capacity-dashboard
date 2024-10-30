@@ -35,66 +35,128 @@ const ConsultantCapacityDashboard = () => {
     capacityStatuses: ['all', 'available', 'at-capacity', 'over-capacity']
   });
 
-  useEffect(() => {
-    applyFilters();
-  }, [filters, consultantData]);
-
-  const applyFilters = () => {
-    let filtered = [...consultantData];
-
-    // Business Line filter
-    if (filters.businessLine !== 'all') {
-      filtered = filtered.map(consultant => ({
-        ...consultant,
-        projects: consultant.projects.filter(project => 
-          project.businessLine === filters.businessLine
-        )
-      }));
+  const generateMonthlyTimeline = (projects) => {
+    // Generate timeline for next 12 months
+    const months = [];
+    const today = new Date();
+    
+    for (let i = 0; i < 12; i++) {
+      const month = new Date(today.getFullYear(), today.getMonth() + i, 1);
+      months.push(month);
     }
 
-    // Timeframe filter
-    if (filters.timeframe !== 'all') {
-      const months = parseInt(filters.timeframe);
-      const cutoffDate = new Date();
-      cutoffDate.setMonth(cutoffDate.getMonth() + months);
+    return months.map(month => {
+      const activeProjects = projects.filter(project => {
+        const startDate = new Date(project.startDate);
+        const endDate = new Date(project.endDate);
+        return (!isNaN(startDate) && !isNaN(endDate)) && 
+               (month >= startDate && month <= endDate);
+      });
+
+      const weightedLoad = activeProjects.reduce((total, project) => 
+        total + (ROLE_WEIGHTS[project.role] || 0), 0);
+
+      return {
+        month: month.toLocaleString('default', { month: 'short', year: '2-digit' }),
+        projects: activeProjects.length,
+        weightedLoad: parseFloat(weightedLoad.toFixed(1)),
+        capacity: Math.max(0, MAX_RECOMMENDED_LOAD - weightedLoad),
+        details: activeProjects.map(p => ({
+          name: p.projectName,
+          role: p.role,
+          businessLine: p.businessLine
+        }))
+      };
+    });
+  };
+
+  const processData = (parsedData) => {
+    try {
+      const splitConsultants = (str) => str ? str.split(';').map(s => s.trim()).filter(Boolean) : [];
       
-      filtered = filtered.map(consultant => ({
-        ...consultant,
-        projects: consultant.projects.filter(project => {
-          const endDate = new Date(project.endDate);
-          return endDate <= cutoffDate;
-        })
-      }));
-    }
+      // Process consultant projects
+      const projectsByConsultant = {};
+      parsedData.data.forEach(project => {
+        const processRole = (names, role) => {
+          splitConsultants(names).forEach(name => {
+            if (!projectsByConsultant[name]) {
+              projectsByConsultant[name] = [];
+            }
+            projectsByConsultant[name].push({
+              projectName: project['Deal Name'],
+              role: role,
+              startDate: project['Contract Start Date'],
+              endDate: project['Contract End Date'],
+              businessLine: project['Primary Business Line']
+            });
+          });
+        };
 
-    // Capacity Status filter
-    if (filters.capacityStatus !== 'all') {
-      filtered = filtered.filter(consultant => {
-        const currentLoad = consultant.timeline[0].weightedLoad;
-        switch (filters.capacityStatus) {
-          case 'available':
-            return currentLoad < MAX_RECOMMENDED_LOAD * 0.8;
-          case 'at-capacity':
-            return currentLoad >= MAX_RECOMMENDED_LOAD * 0.8 && currentLoad <= MAX_RECOMMENDED_LOAD;
-          case 'over-capacity':
-            return currentLoad > MAX_RECOMMENDED_LOAD;
-          default:
-            return true;
+        processRole(project['Project Lead'], 'Lead');
+        processRole(project['Project Co-Lead'], 'Co-Lead');
+        processRole(project['Project Strategic Advisors'], 'Strategic Advisor');
+        processRole(project['Project Supporting Consultants'], 'Supporting');
+      });
+
+      // Generate timeline data for each consultant
+      const consultantsWithTimeline = Object.entries(projectsByConsultant)
+        .map(([name, projects]) => ({
+          name,
+          projects: _.uniqBy(projects, 'projectName'),
+          timeline: generateMonthlyTimeline(projects),
+          currentLoad: projects.filter(p => {
+            const now = new Date();
+            const startDate = new Date(p.startDate);
+            const endDate = new Date(p.endDate);
+            return (!isNaN(startDate) && !isNaN(endDate)) && 
+                   (now >= startDate && now <= endDate);
+          }).length
+        }))
+        .sort((a, b) => b.currentLoad - a.currentLoad);
+
+      setConsultantData(consultantsWithTimeline);
+      setFilteredData(consultantsWithTimeline);
+
+      // Update business line options
+      const businessLines = _.uniq(
+        parsedData.data
+          .map(project => project['Primary Business Line'])
+          .filter(Boolean)
+      );
+      setFilterOptions(prev => ({
+        ...prev,
+        businessLines
+      }));
+    } catch (err) {
+      setError('Error processing data: ' + err.message);
+    }
+  };
+
+  const handleFileUpload = (event) => {
+    setIsLoading(true);
+    setError(null);
+    const file = event.target.files[0];
+    
+    if (file) {
+      Papa.parse(file, {
+        header: true,
+        dynamicTyping: true,
+        skipEmptyLines: true,
+        complete: (results) => {
+          processData(results);
+          setIsLoading(false);
+        },
+        error: (error) => {
+          setError('Error parsing CSV: ' + error.message);
+          setIsLoading(false);
         }
       });
     }
-
-    // Consultant Search
-    if (filters.consultantSearch) {
-      filtered = filtered.filter(consultant =>
-        consultant.name.toLowerCase().includes(filters.consultantSearch.toLowerCase())
-      );
-    }
-
-    setFilteredData(filtered);
   };
 
-  const exportData = (format) => {
+  const toggleConsultant = (consultantName) => {
+    setExpandedConsultant(expandedConsultant === consultantName ? null : consultantName);
+  };const exportData = (format) => {
     const exportTimestamp = new Date().toISOString().split('T')[0];
     
     switch (format) {
@@ -116,13 +178,7 @@ const ConsultantCapacityDashboard = () => {
         downloadFile(csv, `capacity-report-${exportTimestamp}.csv`, 'text/csv');
         break;
 
-      case 'json':
-        const jsonData = JSON.stringify(filteredData, null, 2);
-        downloadFile(jsonData, `capacity-report-${exportTimestamp}.json`, 'application/json');
-        break;
-
       case 'excel':
-        // Generate Excel-compatible CSV
         const excelData = Papa.unparse(filteredData.flatMap(consultant => 
           consultant.timeline.map(month => ({
             Consultant: consultant.name,
@@ -133,6 +189,11 @@ const ConsultantCapacityDashboard = () => {
           }))
         ));
         downloadFile(excelData, `capacity-report-${exportTimestamp}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        break;
+
+      case 'json':
+        const jsonData = JSON.stringify(filteredData, null, 2);
+        downloadFile(jsonData, `capacity-report-${exportTimestamp}.json`, 'application/json');
         break;
     }
   };
@@ -149,7 +210,64 @@ const ConsultantCapacityDashboard = () => {
     window.URL.revokeObjectURL(url);
   };
 
-  // Rest of your existing code...
+  useEffect(() => {
+    const applyFilters = () => {
+      let filtered = [...consultantData];
+
+      // Business Line filter
+      if (filters.businessLine !== 'all') {
+        filtered = filtered.map(consultant => ({
+          ...consultant,
+          projects: consultant.projects.filter(project => 
+            project.businessLine === filters.businessLine
+          )
+        }));
+      }
+
+      // Timeframe filter
+      if (filters.timeframe !== 'all') {
+        const months = parseInt(filters.timeframe);
+        const cutoffDate = new Date();
+        cutoffDate.setMonth(cutoffDate.getMonth() + months);
+        
+        filtered = filtered.map(consultant => ({
+          ...consultant,
+          projects: consultant.projects.filter(project => {
+            const endDate = new Date(project.endDate);
+            return endDate <= cutoffDate;
+          })
+        }));
+      }
+
+      // Capacity Status filter
+      if (filters.capacityStatus !== 'all') {
+        filtered = filtered.filter(consultant => {
+          const currentLoad = consultant.timeline[0].weightedLoad;
+          switch (filters.capacityStatus) {
+            case 'available':
+              return currentLoad < MAX_RECOMMENDED_LOAD * 0.8;
+            case 'at-capacity':
+              return currentLoad >= MAX_RECOMMENDED_LOAD * 0.8 && currentLoad <= MAX_RECOMMENDED_LOAD;
+            case 'over-capacity':
+              return currentLoad > MAX_RECOMMENDED_LOAD;
+            default:
+              return true;
+          }
+        });
+      }
+
+      // Consultant Search
+      if (filters.consultantSearch) {
+        filtered = filtered.filter(consultant =>
+          consultant.name.toLowerCase().includes(filters.consultantSearch.toLowerCase())
+        );
+      }
+
+      setFilteredData(filtered);
+    };
+
+    applyFilters();
+  }, [filters, consultantData]);
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
@@ -253,30 +371,117 @@ const ConsultantCapacityDashboard = () => {
         </div>
       </div>
 
-      {/* Active Filters Display */}
-      {Object.entries(filters).some(([key, value]) => value !== 'all' && value !== '') && (
-        <div className="mb-4 flex flex-wrap gap-2">
-          {Object.entries(filters).map(([key, value]) => {
-            if (value !== 'all' && value !== '') {
-              return (
-                <span key={key} className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-blue-100 text-blue-800">
-                  {key}: {value}
-                  <button
-                    onClick={() => setFilters({ ...filters, [key]: key === 'consultantSearch' ? '' : 'all' })}
-                    className="ml-2 hover:text-blue-600"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </span>
-              );
-            }
-            return null;
-          })}
+      {consultantData.length > 0 && (
+        <div className="space-y-6">
+          {consultantData.map((consultant) => (
+            <div key={consultant.name} className="bg-white rounded-lg shadow">
+              <button
+                onClick={() => toggleConsultant(consultant.name)}
+                className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50"
+              >
+                <div className="flex items-center space-x-4">
+                  <span className="text-lg font-semibold">{consultant.name}</span>
+                  <span className={`px-3 py-1 rounded-full text-sm ${
+                    consultant.currentLoad >= MAX_RECOMMENDED_LOAD 
+                      ? 'bg-red-100 text-red-800'
+                      : 'bg-green-100 text-green-800'
+                  }`}>
+                    {consultant.currentLoad} Active Projects
+                  </span>
+                </div>
+                {expandedConsultant === consultant.name ? (
+                  <ChevronUp className="w-5 h-5 text-gray-500" />
+                ) : (
+                  <ChevronDown className="w-5 h-5 text-gray-500" />
+                )}
+              </button>
+              
+              {expandedConsultant === consultant.name && (
+                <div className="px-6 pb-6">
+                  <div className="mt-4">
+                    <h4 className="text-sm font-medium text-gray-500 mb-2">12-Month Capacity Timeline</h4>
+                    <div className="h-64">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          data={consultant.timeline}
+                          margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="month" />
+                          <YAxis />
+                          <Tooltip 
+                            content={({ active, payload, label }) => {
+                              if (active && payload && payload.length) {
+                                const data = payload[0].payload;
+                                return (
+                                  <div className="bg-white p-4 shadow rounded border">
+                                    <p className="font-semibold">{label}</p>
+                                    <p className="text-sm">Weighted Load: {data.weightedLoad}</p>
+                                    <p className="text-sm text-green-600">Available Capacity: {data.capacity}</p>
+                                    <div className="mt-2">
+                                      <p className="text-xs font-semibold">Active Projects:</p>
+                                      {data.details.map((project, idx) => (
+                                        <p key={idx} className="text-xs">
+                                          {project.name} ({project.role})
+                                        </p>
+                                      ))}
+                                    </div>
+                                  </div>
+                                );
+                              }
+                              return null;
+                            }}
+                          />
+                          <Legend />
+                          <Bar dataKey="weightedLoad" fill="#8884d8" name="Project Load" />
+                          <Bar dataKey="capacity" fill="#82ca9d" name="Available Capacity" />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  <div className="mt-6">
+                    <h4 className="text-sm font-medium text-gray-500 mb-2">Current Projects</h4>
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Project</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Role</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Business Line</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Timeline</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                          {consultant.projects.map((project, idx) => (
+                            <tr key={idx} className="hover:bg-gray-50">
+                              <td className="px-4 py-3 text-sm text-gray-900">{project.projectName}</td>
+                              <td className="px-4 py-3 text-sm">
+                                <span className={`px-2 py-1 rounded-full text-xs ${
+                                  project.role === 'Lead' ? 'bg-green-100 text-green-800' :
+                                  project.role === 'Co-Lead' ? 'bg-blue-100 text-blue-800' :
+                                  project.role === 'Strategic Advisor' ? 'bg-yellow-100 text-yellow-800' :
+                                  'bg-gray-100 text-gray-800'
+                                }`}>
+                                  {project.role}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-sm text-gray-500">{project.businessLine}</td>
+                              <td className="px-4 py-3 text-sm text-gray-500">
+                                {project.startDate} - {project.endDate}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
-
-      {/* Rest of your existing dashboard content here... */}
-      
     </div>
   );
 };
