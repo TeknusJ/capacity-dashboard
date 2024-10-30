@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
+} from 'recharts';
 import Papa from 'papaparse';
 import _ from 'lodash';
-import { Upload, Download, Filter, Calendar, ChevronDown, ChevronUp, X } from 'lucide-react';
+import { Upload, Download, ChevronDown, ChevronUp } from 'lucide-react';
 
 const ROLE_WEIGHTS = {
   'Lead': 1,
@@ -19,7 +21,7 @@ const ConsultantCapacityDashboard = () => {
   const [expandedConsultant, setExpandedConsultant] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
-  
+
   // Filter states
   const [filters, setFilters] = useState({
     businessLine: 'all',
@@ -27,7 +29,7 @@ const ConsultantCapacityDashboard = () => {
     capacityStatus: 'all',
     consultantSearch: ''
   });
-  
+
   // Available filter options
   const [filterOptions, setFilterOptions] = useState({
     businessLines: [],
@@ -39,7 +41,7 @@ const ConsultantCapacityDashboard = () => {
     // Generate timeline for next 12 months
     const months = [];
     const today = new Date();
-    
+
     for (let i = 0; i < 12; i++) {
       const month = new Date(today.getFullYear(), today.getMonth() + i, 1);
       months.push(month);
@@ -49,11 +51,11 @@ const ConsultantCapacityDashboard = () => {
       const activeProjects = projects.filter(project => {
         const startDate = new Date(project.startDate);
         const endDate = new Date(project.endDate);
-        return (!isNaN(startDate) && !isNaN(endDate)) && 
-               (month >= startDate && month <= endDate);
+        return (!isNaN(startDate) && !isNaN(endDate)) &&
+          (month >= startDate && month <= endDate);
       });
 
-      const weightedLoad = activeProjects.reduce((total, project) => 
+      const weightedLoad = activeProjects.reduce((total, project) =>
         total + (ROLE_WEIGHTS[project.role] || 0), 0);
 
       return {
@@ -73,7 +75,7 @@ const ConsultantCapacityDashboard = () => {
   const processData = (parsedData) => {
     try {
       const splitConsultants = (str) => str ? str.split(';').map(s => s.trim()).filter(Boolean) : [];
-      
+
       // Process consultant projects
       const projectsByConsultant = {};
       parsedData.data.forEach(project => {
@@ -108,8 +110,8 @@ const ConsultantCapacityDashboard = () => {
             const now = new Date();
             const startDate = new Date(p.startDate);
             const endDate = new Date(p.endDate);
-            return (!isNaN(startDate) && !isNaN(endDate)) && 
-                   (now >= startDate && now <= endDate);
+            return (!isNaN(startDate) && !isNaN(endDate)) &&
+              (now >= startDate && now <= endDate);
           }).length
         }))
         .sort((a, b) => b.currentLoad - a.currentLoad);
@@ -136,7 +138,7 @@ const ConsultantCapacityDashboard = () => {
     setIsLoading(true);
     setError(null);
     const file = event.target.files[0];
-    
+
     if (file) {
       Papa.parse(file, {
         header: true,
@@ -156,12 +158,14 @@ const ConsultantCapacityDashboard = () => {
 
   const toggleConsultant = (consultantName) => {
     setExpandedConsultant(expandedConsultant === consultantName ? null : consultantName);
-  };const exportData = (format) => {
+  };
+
+  const exportData = (format) => {
     const exportTimestamp = new Date().toISOString().split('T')[0];
-    
+
     switch (format) {
       case 'csv':
-        const csvData = filteredData.flatMap(consultant => 
+        const csvData = filteredData.flatMap(consultant =>
           consultant.projects.map(project => ({
             Consultant: consultant.name,
             Project: project.projectName,
@@ -179,7 +183,7 @@ const ConsultantCapacityDashboard = () => {
         break;
 
       case 'excel':
-        const excelData = Papa.unparse(filteredData.flatMap(consultant => 
+        const excelData = Papa.unparse(filteredData.flatMap(consultant =>
           consultant.timeline.map(month => ({
             Consultant: consultant.name,
             Month: month.month,
@@ -194,6 +198,10 @@ const ConsultantCapacityDashboard = () => {
       case 'json':
         const jsonData = JSON.stringify(filteredData, null, 2);
         downloadFile(jsonData, `capacity-report-${exportTimestamp}.json`, 'application/json');
+        break;
+
+      default:
+        console.warn(`Unsupported export format: ${format}`);
         break;
     }
   };
@@ -218,7 +226,7 @@ const ConsultantCapacityDashboard = () => {
       if (filters.businessLine !== 'all') {
         filtered = filtered.map(consultant => ({
           ...consultant,
-          projects: consultant.projects.filter(project => 
+          projects: consultant.projects.filter(project =>
             project.businessLine === filters.businessLine
           )
         }));
@@ -229,7 +237,7 @@ const ConsultantCapacityDashboard = () => {
         const months = parseInt(filters.timeframe);
         const cutoffDate = new Date();
         cutoffDate.setMonth(cutoffDate.getMonth() + months);
-        
+
         filtered = filtered.map(consultant => ({
           ...consultant,
           projects: consultant.projects.filter(project => {
@@ -382,7 +390,7 @@ const ConsultantCapacityDashboard = () => {
                 <div className="flex items-center space-x-4">
                   <span className="text-lg font-semibold">{consultant.name}</span>
                   <span className={`px-3 py-1 rounded-full text-sm ${
-                    consultant.currentLoad >= MAX_RECOMMENDED_LOAD 
+                    consultant.currentLoad >= MAX_RECOMMENDED_LOAD
                       ? 'bg-red-100 text-red-800'
                       : 'bg-green-100 text-green-800'
                   }`}>
@@ -395,7 +403,7 @@ const ConsultantCapacityDashboard = () => {
                   <ChevronDown className="w-5 h-5 text-gray-500" />
                 )}
               </button>
-              
+
               {expandedConsultant === consultant.name && (
                 <div className="px-6 pb-6">
                   <div className="mt-4">
@@ -409,7 +417,7 @@ const ConsultantCapacityDashboard = () => {
                           <CartesianGrid strokeDasharray="3 3" />
                           <XAxis dataKey="month" />
                           <YAxis />
-                          <Tooltip 
+                          <Tooltip
                             content={({ active, payload, label }) => {
                               if (active && payload && payload.length) {
                                 const data = payload[0].payload;
